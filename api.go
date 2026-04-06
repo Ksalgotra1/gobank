@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 
+	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
 )
 
@@ -27,7 +30,7 @@ func (s *APIServer) Run() {
 
 	router.HandleFunc("/account", makeHTTPHandleFunc(s.handleAccount))
 
-	router.HandleFunc("/account/{id}", makeHTTPHandleFunc(s.handleGetAccountByID))
+	router.HandleFunc("/account/{id}", withJWTAuth(makeHTTPHandleFunc(s.handleGetAccountByID)))
 
 	router.HandleFunc("/transfer", makeHTTPHandleFunc(s.handleTransfer))
 
@@ -67,6 +70,11 @@ func (s *APIServer) handleGetAccountByID(w http.ResponseWriter, r *http.Request)
 			return err
 		}
 
+		// 🚨 AUTHORIZATION CHECK: Prevent User A from reading User B's account!
+		if err := matchJWT(r, id); err != nil {
+			return err
+		}
+
 		account, err := s.store.GetAccountByID(id)
 		if err != nil {
 			return err
@@ -94,21 +102,34 @@ func (s *APIServer) handleCreateAccount(w http.ResponseWriter, r *http.Request) 
 		return err
 	}
 
+	tokenString, err := createJWT(account)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("JWT token:", tokenString)
+
 	return WriteJSON(w, http.StatusOK, account)
 }
 
 func (s *APIServer) handleDeleteAccount(w http.ResponseWriter, r *http.Request) error {
-	id, err := getID(r)
+	// Get the ID from URL
+	targetID, err := getID(r)
 
 	if err != nil {
 		return err
 	}
 
-	if err := s.store.DeleteAccount(id); err != nil {
+	//  AUTHORIZATION CHECK (Using helper!)
+	if err := matchJWT(r, targetID); err != nil {
 		return err
 	}
 
-	return WriteJSON(w, http.StatusOK, map[string]int{"deleted": id})
+	if err := s.store.DeleteAccount(targetID); err != nil {
+		return err
+	}
+
+	return WriteJSON(w, http.StatusOK, map[string]int{"deleted": targetID})
 }
 
 func (s *APIServer) handleTransfer(w http.ResponseWriter, r *http.Request) error {
@@ -123,11 +144,80 @@ func (s *APIServer) handleTransfer(w http.ResponseWriter, r *http.Request) error
 	return WriteJSON(w, http.StatusOK, transferReq)
 }
 
+func createJWT(account *Account) (string, error) {
+	claims := jwt.MapClaims{
+		"expiresAt":     15000,
+		"accountNumber": account.Number,
+		"userID":        account.ID,
+	}
+	// Build the token using the HS256 algorithm
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	// Fetch your server's secret from .env
+	secret := os.Getenv("JWT_SECRET")
+	// Cryptographically sign the token
+	return token.SignedString([]byte(secret))
+}
+
+func withJWTAuth(handlerFunc http.HandlerFunc) http.HandlerFunc {
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("Calling JWT auth middleware")
+
+		tokenString := r.Header.Get("x-jwt-token")
+
+		token, err := validateJWT(tokenString)
+
+		if err != nil {
+			WriteJSON(w, http.StatusForbidden, ApiError{Error: "invalid token"})
+			return
+		}
+
+		// 1. Grab the payload (claims) out of the validated token
+		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+
+			// Optional: This is where you would normally check if the claims["userID"]
+			// matches the mux.Vars(r)["id"] before continuing!
+			// 2. Put the claims into the Request Context
+			ctx := context.WithValue(r.Context(), "user_claims", claims)
+
+			// 3. Create a cloned HTTP Request with the new Context attached
+			r = r.WithContext(ctx)
+
+			// 4. Pass the new request down to the actual handler (like handleTransfer)
+			handlerFunc(w, r)
+			return
+		}
+		WriteJSON(w, http.StatusForbidden, ApiError{Error: "Permission Denied"})
+	}
+}
+
+func validateJWT(tokenString string) (*jwt.Token, error) {
+	secret := os.Getenv("JWT_SECRET")
+	token, err := jwt.Parse(tokenString,
+		func(token *jwt.Token) (any, error) {
+			// cast to []byte
+			return []byte(secret), nil
+		},
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
+	if err != nil {
+		return nil, err
+	}
+	return token, nil
+}
+
 func WriteJSON(w http.ResponseWriter, status int, v any) error {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	return json.NewEncoder(w).Encode(v)
+}
+
+func getClaimsFromContext(r *http.Request) (jwt.MapClaims, error) {
+	claims, ok := r.Context().Value("user_claims").(jwt.MapClaims)
+	if !ok {
+		return nil, fmt.Errorf("no claims found in context or wrong type")
+	}
+	return claims, nil
 }
 
 // we need to make our handler functions that return an err to http.HandlerFunc type which dont
@@ -157,4 +247,19 @@ func getID(r *http.Request) (int, error) {
 	}
 
 	return id, nil
+}
+
+func matchJWT(r *http.Request, targetAccountID int) error {
+	claims, err := getClaimsFromContext(r)
+	if err != nil {
+		return err
+	}
+
+	tokenID := int(claims["userID"].(float64))
+
+	if tokenID != targetAccountID {
+		return fmt.Errorf("permission denied: you do not own account %d", targetAccountID)
+	}
+
+	return nil
 }
