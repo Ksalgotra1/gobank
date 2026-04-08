@@ -15,6 +15,7 @@ type Storage interface {
 	GetAccounts() ([]*models.Account, error)
 	GetAccountByID(int) (*models.Account, error)
 	GetAccountByNumber(int) (*models.Account, error)
+	Transfer(amount int, fromAccountID int, toAccountID int) error
 	Init() error
 }
 
@@ -88,6 +89,56 @@ func (s *PostgresStore) UpdateAccount(*models.Account) error {
 func (s *PostgresStore) DeleteAccount(id int) error {
 	_, err := s.db.Query("DELETE FROM ACCOUNT WHERE id = $1", id)
 
+	return err
+}
+
+func (s *PostgresStore) Transfer(amount int, fromAccountID int, toAccountID int) error {
+	// 1. Begin the ACID Transaction!
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+
+	// Helper: If anything goes wrong below, ROLLBACK the transaction securely!
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// 2. Check if the sender has enough funds AND lock their row from concurrent modification (FOR UPDATE)
+	var balance int
+	err = tx.QueryRow("SELECT balance FROM account WHERE id = $1 FOR UPDATE", fromAccountID).Scan(&balance)
+	if err != nil {
+		return fmt.Errorf("sender account not found: %v", err)
+	}
+
+	if balance < amount {
+		err = fmt.Errorf("insufficient funds") // This triggers the defer rollback!
+		return err
+	}
+
+	// 3. Subtract funds from the Sender
+	_, err = tx.Exec("UPDATE account SET balance = balance - $1 WHERE id = $2", amount, fromAccountID)
+	if err != nil {
+		return err
+	}
+
+	// 4. Add funds to the Receiver
+	res, err := tx.Exec("UPDATE account SET balance = balance + $1 WHERE id = $2", amount, toAccountID)
+	if err != nil {
+		return err
+	}
+	
+	// Double check the receiver actually exists before committing
+	rowsAffected, _ := res.RowsAffected()
+	if rowsAffected == 0 {
+		err = fmt.Errorf("receiver account not found") // Triggers rollback!
+		return err
+	}
+
+	// 5. Success! Commit the changes permanently. 
+	err = tx.Commit()
 	return err
 }
 

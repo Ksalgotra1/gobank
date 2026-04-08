@@ -38,7 +38,8 @@ func (s *Server) Run() {
 
 	router.HandleFunc("/account/{id}", withJWTAuth(makeHTTPHandleFunc(s.handleGetAccountByID)))
 
-	router.HandleFunc("/transfer", makeHTTPHandleFunc(s.handleTransfer))
+	// Secure the transfer route so we know EXACTLY who is sending the money!
+	router.HandleFunc("/transfer", withJWTAuth(makeHTTPHandleFunc(s.handleTransfer)))
 
 	log.Println("JSON API running on port: ", s.listenAddr)
 
@@ -166,13 +167,33 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) err
 func (s *Server) handleTransfer(w http.ResponseWriter, r *http.Request) error {
 	defer r.Body.Close()
 
-	transferReq := new(models.TransferRequest)
+	if r.Method != "POST" {
+		return fmt.Errorf("method not allowed %s", r.Method)
+	}
 
+	transferReq := new(models.TransferRequest)
 	if err := json.NewDecoder(r.Body).Decode(transferReq); err != nil {
 		return err
 	}
 
-	return WriteJSON(w, http.StatusOK, transferReq)
+	//  AUTHORIZATION: Who is officially logged in and sending this money?
+	claims, err := getClaimsFromContext(r)
+	if err != nil {
+		return err
+	}
+
+	// Float64 is naturally returned by JSON decoding in the JWT library
+	senderID := int(claims["userID"].(float64))
+
+	// Execute our ACID Transaction in Postgres!
+	if err := s.store.Transfer(transferReq.Amount, senderID, transferReq.ToAccount); err != nil {
+		return err
+	}
+
+	return WriteJSON(w, http.StatusOK, map[string]string{
+		"status": "transfer successful",
+		"amount": fmt.Sprintf("%d", transferReq.Amount),
+	})
 }
 
 func createJWT(account *models.Account) (string, error) {
