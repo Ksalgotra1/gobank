@@ -11,6 +11,7 @@ import (
 
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type APIServer struct {
@@ -28,6 +29,8 @@ func newAPIServer(listenAddr string, store Storage) *APIServer {
 func (s *APIServer) Run() {
 	router := mux.NewRouter()
 
+	router.HandleFunc("/login", makeHTTPHandleFunc(s.handleLogin))
+
 	router.HandleFunc("/account", makeHTTPHandleFunc(s.handleAccount))
 
 	router.HandleFunc("/account/{id}", withJWTAuth(makeHTTPHandleFunc(s.handleGetAccountByID)))
@@ -37,6 +40,36 @@ func (s *APIServer) Run() {
 	log.Println("JSON API running on port: ", s.listenAddr)
 
 	http.ListenAndServe(s.listenAddr, router)
+}
+
+func (s *APIServer) handleLogin(w http.ResponseWriter, r *http.Request) error {
+	if r.Method != "POST" {
+		return fmt.Errorf("method not allowed %s", r.Method)
+	}
+	var req LoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return err
+	}
+
+	acc, err := s.store.GetAccountByNumber(int(req.Number))
+	if err != nil {
+		return err
+	}
+
+	// 1. Compare the Hashed Database password to the Raw password
+	if err := bcrypt.CompareHashAndPassword([]byte(acc.EncryptedPassword), []byte(req.Password)); err != nil {
+		// If the math fails, reject them violently!
+		return fmt.Errorf("not authenticated: invalid password")
+	}
+
+	// 2. If the math succeeded, the password is correct! Let's generate their token.
+	token, err := createJWT(acc)
+	if err != nil {
+		return err
+	}
+
+	// 3. Instead of echoing the request, send them their brand new token!
+	return WriteJSON(w, http.StatusOK, map[string]string{"token": token})
 }
 
 func (s *APIServer) handleAccount(w http.ResponseWriter, r *http.Request) error {
@@ -70,7 +103,7 @@ func (s *APIServer) handleGetAccountByID(w http.ResponseWriter, r *http.Request)
 			return err
 		}
 
-		// 🚨 AUTHORIZATION CHECK: Prevent User A from reading User B's account!
+		// AUTHORIZATION CHECK: Prevent User A from reading User B's account!
 		if err := matchJWT(r, id); err != nil {
 			return err
 		}
@@ -96,18 +129,13 @@ func (s *APIServer) handleCreateAccount(w http.ResponseWriter, r *http.Request) 
 		return err
 	}
 
-	account := NewAccount(createAccountReq.FirstName, createAccountReq.LastName)
-
-	if err := s.store.CreateAccount(account); err != nil {
-		return err
-	}
-
-	tokenString, err := createJWT(account)
+	account, err := NewAccount(createAccountReq.FirstName, createAccountReq.LastName, createAccountReq.Password)
 	if err != nil {
 		return err
 	}
-
-	fmt.Println("JWT token:", tokenString)
+	if err := s.store.CreateAccount(account); err != nil {
+		return err
+	}
 
 	return WriteJSON(w, http.StatusOK, account)
 }
@@ -175,8 +203,6 @@ func withJWTAuth(handlerFunc http.HandlerFunc) http.HandlerFunc {
 		// 1. Grab the payload (claims) out of the validated token
 		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
 
-			// Optional: This is where you would normally check if the claims["userID"]
-			// matches the mux.Vars(r)["id"] before continuing!
 			// 2. Put the claims into the Request Context
 			ctx := context.WithValue(r.Context(), "user_claims", claims)
 
