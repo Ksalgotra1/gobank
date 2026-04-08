@@ -4,39 +4,90 @@
 ![Postgres](https://img.shields.io/badge/postgres-%23316192.svg?style=for-the-badge&logo=postgresql&logoColor=white)
 ![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)
 
-A robust, fully Dockerized REST API built in Go for handling core banking operations. This backend system handles accounts, transfers, JWT authentication, and utilizes raw PostgreSQL queries for high-performance data management.
+An enterprise-grade, fully orchestrated REST API built in Go for handling core banking operations. This backend system handles accounts, secure atomic transfers, JWT & Bcrypt authentication, and utilizes raw PostgreSQL ACID transactions for bulletproof data management.
 
 ## Project Context
 
-> **Architectural Sandbox:** This repository serves as a foundational architecture testbed. It was designed to establish scalable patterns in Go (Clean Architecture, Interface usage, Dockerization) before integrating these identical structures into my flagship high-concurrency project, **UniGo** (a massive, high-concurrency spatial-temporal ride-pooling system).
+> **Architectural Sandbox:** This repository serves as an advanced learning step and foundational architecture testbed. It was designed to establish and master scalable patterns in Go (Official Standard Layout, Clean Architecture, Dockerization) to bridge the gap between basic backend tutorials and production-grade software engineering.
 
-## Features
+## Directory Structure
 
-- **Account Management**: Create, read, and delete bank accounts securely.
-- **Transfers**: Transfer funds between accounts.
-- **Authentication**: JWT-secured endpoints to ensure authorized access.
-- **Database**: Direct PostgreSQL integration utilizing raw SQL queries for optimized performance.
-- **Dockerized**: Containerized application and database for seamless deployment.
+```mermaid
+graph TD;
+    gobank[gobank/] --> cmd[cmd/]
+    cmd --> gobankcmd[gobank/]
+    gobankcmd --> main["main.go (Ignition/Seeding)"]
+    
+    gobank --> internal[internal/]
+    internal --> api[api/]
+    api --> server["server.go (HTTP/JWT logic)"]
+    api --> servertest["server_test.go (Mocking)"]
+    
+    internal --> models[models/]
+    models --> types["types.go (Interfaces/Structs)"]
+    
+    internal --> storage[storage/]
+    storage --> postgres["postgres.go (ACID/Queries)"]
+    
+    gobank --> docker[Dockerfile]
+    gobank --> compose[docker-compose.yml]
+    gobank --> makefile[Makefile]
+```
+
+## Key Architectural Features
+
+- **Standard Go Project Layout**: Refactored from a flat structure into strict `cmd/` and `internal/` domains, ensuring one-way dependency flow and absolute package isolation.
+- **ACID Database Transactions**: Financial transfers utilize PostgreSQL `tx.Begin()`, `tx.Commit()`, and `tx.Rollback()` to protect against race conditions and mid-transfer network crashes.
+- **Automated Mock Testing**: Implements `net/http/httptest` and interface dependency injection to test API logic natively in-memory without booting the full server.
+- **Cryptographic Authentication**: Mandates `golang.org/x/crypto/bcrypt` hashing for database credentials and requires self-signed JWT Headers for secure resource access.
+- **Multi-Stage Orchestration**: Packaged via Docker Compose using an ultra-lightweight compiled `golang:alpine` container networked to a persistent PostgreSQL volume.
+
+---
 
 ## Tech Stack
 
-- **Language**: [Go](https://golang.org/)
-- **Router**: [Gorilla Mux](https://github.com/gorilla/mux)
-- **Database**: [PostgreSQL](https://www.postgresql.org/)
-- **Infrastructure**: [Docker](https://www.docker.com/) & Docker Compose
+- **Language**: Go 1.22+
+- **Router**: Gorilla Mux
+- **Database**: PostgreSQL 15
+- **Security**: JWT (v5) & Bcrypt
+- **Testing**: Testify
+- **Infrastructure**: Docker & Docker Compose
 
-## Getting Started
+---
 
-1. Clone the repository.
-2. Run database and application using Docker Compose:
-   ```bash
-   docker-compose up --build
-   ```
-3. The API will be accessible on port configured in the Docker setup (default `:3000`).
+## Getting Started (Quick Run)
 
-## Architecture
+You can launch the entire Database and API cluster seamlessly using the built-in Makefile.
 
-This project is built focusing on clean architecture principles:
-- Robust Interface usage for dependency injection and easy testing.
-- Separation of concerns between routing, application logic, and storage.
-- Standardized error handling and JSON responses.
+### 1. Boot the Architecture
+```bash
+# This automatically builds the Alpine Linux container and connects Postgres
+make docker-up
+```
+
+### 2. View Backend Logs
+```bash
+docker-compose logs -f
+```
+
+### 3. Teardown
+```bash
+make docker-down
+```
+
+---
+
+## Developer Workflow
+
+If you want to run the codebase locally natively (without Docker) to iterate fast:
+
+```bash
+# Boot a local database instance
+docker run --name some-postgres -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=mysecretpassword -e POSTGRES_DB=postgres -p 5432:5432 -d postgres
+
+# Run the API and automatically seed the database with testing dummy accounts!
+go run ./cmd/gobank --seed
+
+# Run the automated unit testing suite
+make test
+```
