@@ -4,3 +4,7 @@ run: build
 	@./bin/gobank
 test: 
 	@go test -v ./...
+docker-up:
+	@docker-compose up -d
+docker-down:
+	@docker-compose down

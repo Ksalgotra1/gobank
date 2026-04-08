@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"fmt"
+	"os"
 
 	_ "github.com/lib/pq"
 	"gobank/internal/models"
@@ -24,7 +25,11 @@ type PostgresStore struct {
 }
 
 func NewPostgresStore() (*PostgresStore, error) {
-	connStr := "user=postgres password=mysecretpassword dbname=postgres sslmode=disable"
+	host := os.Getenv("DB_HOST")
+	if host == "" {
+		host = "localhost"
+	}
+	connStr := fmt.Sprintf("host=%s user=postgres password=mysecretpassword dbname=postgres sslmode=disable", host)
 	db, err := sql.Open("postgres", connStr)
 
 	if err != nil {
