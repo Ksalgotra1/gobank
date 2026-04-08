@@ -1,4 +1,4 @@
-package main
+package api
 
 import (
 	"context"
@@ -12,21 +12,24 @@ import (
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
 	"golang.org/x/crypto/bcrypt"
+
+	"gobank/internal/models"
+	"gobank/internal/storage"
 )
 
-type APIServer struct {
+type Server struct {
 	listenAddr string
-	store      Storage
+	store      storage.Storage
 }
 
-func newAPIServer(listenAddr string, store Storage) *APIServer {
-	return &APIServer{
+func NewServer(listenAddr string, store storage.Storage) *Server {
+	return &Server{
 		listenAddr: listenAddr,
 		store:      store,
 	}
 }
 
-func (s *APIServer) Run() {
+func (s *Server) Run() {
 	router := mux.NewRouter()
 
 	router.HandleFunc("/login", makeHTTPHandleFunc(s.handleLogin))
@@ -42,11 +45,11 @@ func (s *APIServer) Run() {
 	http.ListenAndServe(s.listenAddr, router)
 }
 
-func (s *APIServer) handleLogin(w http.ResponseWriter, r *http.Request) error {
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) error {
 	if r.Method != "POST" {
 		return fmt.Errorf("method not allowed %s", r.Method)
 	}
-	var req LoginRequest
+	var req models.LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return err
 	}
@@ -72,7 +75,7 @@ func (s *APIServer) handleLogin(w http.ResponseWriter, r *http.Request) error {
 	return WriteJSON(w, http.StatusOK, map[string]string{"token": token})
 }
 
-func (s *APIServer) handleAccount(w http.ResponseWriter, r *http.Request) error {
+func (s *Server) handleAccount(w http.ResponseWriter, r *http.Request) error {
 	if r.Method == "GET" {
 		return s.handleGetAccount(w, r)
 	}
@@ -85,7 +88,7 @@ func (s *APIServer) handleAccount(w http.ResponseWriter, r *http.Request) error 
 
 // GET/account
 // return accounts
-func (s *APIServer) handleGetAccount(w http.ResponseWriter, r *http.Request) error {
+func (s *Server) handleGetAccount(w http.ResponseWriter, r *http.Request) error {
 	accounts, err := s.store.GetAccounts()
 
 	if err != nil {
@@ -95,7 +98,7 @@ func (s *APIServer) handleGetAccount(w http.ResponseWriter, r *http.Request) err
 	return WriteJSON(w, http.StatusOK, accounts)
 }
 
-func (s *APIServer) handleGetAccountByID(w http.ResponseWriter, r *http.Request) error {
+func (s *Server) handleGetAccountByID(w http.ResponseWriter, r *http.Request) error {
 	if r.Method == "GET" {
 		id, err := getID(r)
 
@@ -123,13 +126,13 @@ func (s *APIServer) handleGetAccountByID(w http.ResponseWriter, r *http.Request)
 	return fmt.Errorf("mehtod not allowed %s", r.Method)
 }
 
-func (s *APIServer) handleCreateAccount(w http.ResponseWriter, r *http.Request) error {
-	createAccountReq := new(CreateAccountRequest)
+func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) error {
+	createAccountReq := new(models.CreateAccountRequest)
 	if err := json.NewDecoder(r.Body).Decode(createAccountReq); err != nil {
 		return err
 	}
 
-	account, err := NewAccount(createAccountReq.FirstName, createAccountReq.LastName, createAccountReq.Password)
+	account, err := models.NewAccount(createAccountReq.FirstName, createAccountReq.LastName, createAccountReq.Password)
 	if err != nil {
 		return err
 	}
@@ -140,7 +143,7 @@ func (s *APIServer) handleCreateAccount(w http.ResponseWriter, r *http.Request) 
 	return WriteJSON(w, http.StatusOK, account)
 }
 
-func (s *APIServer) handleDeleteAccount(w http.ResponseWriter, r *http.Request) error {
+func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) error {
 	// Get the ID from URL
 	targetID, err := getID(r)
 
@@ -160,10 +163,10 @@ func (s *APIServer) handleDeleteAccount(w http.ResponseWriter, r *http.Request) 
 	return WriteJSON(w, http.StatusOK, map[string]int{"deleted": targetID})
 }
 
-func (s *APIServer) handleTransfer(w http.ResponseWriter, r *http.Request) error {
+func (s *Server) handleTransfer(w http.ResponseWriter, r *http.Request) error {
 	defer r.Body.Close()
 
-	transferReq := new(TransferRequest)
+	transferReq := new(models.TransferRequest)
 
 	if err := json.NewDecoder(r.Body).Decode(transferReq); err != nil {
 		return err
@@ -172,7 +175,7 @@ func (s *APIServer) handleTransfer(w http.ResponseWriter, r *http.Request) error
 	return WriteJSON(w, http.StatusOK, transferReq)
 }
 
-func createJWT(account *Account) (string, error) {
+func createJWT(account *models.Account) (string, error) {
 	claims := jwt.MapClaims{
 		"expiresAt":     15000,
 		"accountNumber": account.Number,

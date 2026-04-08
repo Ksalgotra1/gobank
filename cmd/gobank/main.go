@@ -6,10 +6,13 @@ import (
 	"log"
 
 	"github.com/joho/godotenv"
+	"gobank/internal/api"
+	"gobank/internal/models"
+	"gobank/internal/storage"
 )
 
-func seedAccount(store Storage, fname, lname, pw string) *Account {
-	acc, err := NewAccount(fname, lname, pw)
+func seedAccount(store storage.Storage, fname, lname, pw string) *models.Account {
+	acc, err := models.NewAccount(fname, lname, pw)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -22,7 +25,7 @@ func seedAccount(store Storage, fname, lname, pw string) *Account {
 	return acc
 }
 
-func seedAccounts(s Storage) {
+func seedAccounts(s storage.Storage) {
 	seedAccount(s, "Arijit", "Singh", "password123")
 	seedAccount(s, "Krish", "Tester", "password123")
 }
@@ -37,12 +40,12 @@ func main() {
 		log.Println("No .env file found, relying on environment variables")
 	}
 
-	store, err := NewPostgresStore()
+	store, err := storage.NewPostgresStore()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	if err := store.init(); err != nil {
+	if err := store.Init(); err != nil {
 		log.Fatal(err)
 	}
 
@@ -52,6 +55,6 @@ func main() {
 		seedAccounts(store)
 	}
 
-	server := newAPIServer(":3000", store)
+	server := api.NewServer(":3000", store)
 	server.Run()
 }
