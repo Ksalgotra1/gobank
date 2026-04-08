@@ -12,26 +12,22 @@ An enterprise-grade, fully orchestrated REST API built in Go for handling core b
 
 ## Directory Structure
 
-```mermaid
-graph TD;
-    gobank[gobank/] --> cmd[cmd/]
-    cmd --> gobankcmd[gobank/]
-    gobankcmd --> main["main.go (Ignition/Seeding)"]
-    
-    gobank --> internal[internal/]
-    internal --> api[api/]
-    api --> server["server.go (HTTP/JWT logic)"]
-    api --> servertest["server_test.go (Mocking)"]
-    
-    internal --> models[models/]
-    models --> types["types.go (Interfaces/Structs)"]
-    
-    internal --> storage[storage/]
-    storage --> postgres["postgres.go (ACID/Queries)"]
-    
-    gobank --> docker[Dockerfile]
-    gobank --> compose[docker-compose.yml]
-    gobank --> makefile[Makefile]
+```text
+gobank/
+├── cmd/
+│   └── gobank/
+│       └── main.go           (Ignition/Seeding)
+├── internal/
+│   ├── api/
+│   │   ├── server.go         (HTTP/JWT logic)
+│   │   └── server_test.go    (Mocking)
+│   ├── models/
+│   │   └── types.go          (Interfaces/Structs)
+│   └── storage/
+│       └── postgres.go       (ACID/Queries)
+├── Dockerfile
+├── docker-compose.yml
+└── Makefile
 ```
 
 ## Key Architectural Features
